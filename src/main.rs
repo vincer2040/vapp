@@ -1,13 +1,37 @@
+use std::process::exit;
+
 use config::{Config, ConfigBuilder};
 use util::{read_line, yn_to_bool};
 
+use crate::app_builder::AppBuilder;
+
+mod app_builder;
 mod config;
 mod util;
 
-fn main() -> std::io::Result<()>{
-    let config = build_config()?;
+fn main() {
+    let config = match build_config() {
+        Ok(c) => c,
+        Err(e) => {
+            println!("{:#?}", e);
+            exit(1);
+        }
+    };
     println!("{:#?}", config);
-    Ok(())
+    let app_builder = match AppBuilder::new(config) {
+        Ok(ab) => ab,
+        Err(e) => {
+            println!("{:#?}", e);
+            exit(1);
+        }
+    };
+    match app_builder.build() {
+        Ok(_) => (),
+        Err(e) => {
+            println!("{:#?}", e);
+            exit(1);
+        }
+    };
 }
 
 fn build_config() -> std::io::Result<Config> {
