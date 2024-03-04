@@ -1,0 +1,48 @@
+package weather
+
+import (
+	"github.com/gorilla/sessions"
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
+    "##mod_name##/internal/##ctx##"
+	"##mod_name##/internal/env"
+	"##mod_name##/internal/render"
+	"##mod_name##/internal/routes"
+    "##mod_name##/internal/db"
+)
+
+func Main() error {
+
+	err := env.EnvInit()
+	if err != nil {
+		return err
+	}
+
+	store := sessions.NewCookieStore([]byte(env.GetSessionSecret()))
+
+    db, err := db.New(env.GetDBUrl())
+    if err != nil {
+        return err
+    }
+
+	e := echo.New()
+
+	e.Renderer = render.New()
+	e.Use(middleware.Logger())
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			cc := wctx.WCtx{
+				Context: c,
+				Store:   store,
+                DB: db,
+			}
+			return next(cc)
+		}
+	})
+	e.Static("/css", "public/css")
+	e.GET("/", routes.RootGet)
+
+	e.Logger.Fatal(e.Start(":8080"))
+
+	return nil
+}

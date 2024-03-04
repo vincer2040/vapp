@@ -1,0 +1,11 @@
+package ##ctx##
+
+import (
+    ##imports##
+)
+
+type ##Ctx## struct {
+    echo.Context
+    ##session_store##
+    ##db##
+}

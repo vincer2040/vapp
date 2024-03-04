@@ -1,0 +1,13 @@
+package env
+
+import (
+	"os"
+
+	"github.com/joho/godotenv"
+)
+
+func EnvInit() error {
+    err := godotenv.Load()
+    return err
+}
+

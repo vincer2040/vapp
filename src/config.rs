@@ -6,6 +6,7 @@ pub struct Config {
     pub turso: bool,
     pub htmx: bool,
     pub tailwind: bool,
+    pub air: bool,
 }
 
 pub struct ConfigBuilder {
@@ -14,6 +15,7 @@ pub struct ConfigBuilder {
     turso: Option<bool>,
     htmx: Option<bool>,
     tailwind: Option<bool>,
+    air: Option<bool>,
 }
 
 impl ConfigBuilder {
@@ -24,6 +26,7 @@ impl ConfigBuilder {
             turso: None,
             htmx: None,
             tailwind: None,
+            air: None,
         }
     }
 
@@ -52,6 +55,11 @@ impl ConfigBuilder {
         self
     }
 
+    pub fn add_air(mut self, value: bool) -> Self {
+        self.air = Some(value);
+        self
+    }
+
     pub fn out(self) -> Config {
         Config {
             app_name: match self.app_name {
@@ -71,6 +79,10 @@ impl ConfigBuilder {
                 None => false,
             },
             tailwind: match self.tailwind {
+                Some(value) => value,
+                None => false,
+            },
+            air: match self.air {
                 Some(value) => value,
                 None => false,
             },

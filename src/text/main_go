@@ -1,7 +1,13 @@
 package ##name##
 
-import "##mod_name##"
+import (
+    "log"
+    "##mod_name##"
+)
 
 func main() {
-    ##name##.Main()
+    err := ##name##.Main()
+    if err != nil {
+        log.Fatalln(err)
+    }
 }

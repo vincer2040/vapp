@@ -1,9 +1,6 @@
-use std::{env, error::Error};
+use std::{env, error::Error, io::Write};
 
-use crate::{
-    config::Config,
-    util::get_git_username,
-};
+use crate::{config::Config, util::get_git_username};
 
 type AppBuilderError = Box<dyn Error>;
 
@@ -51,12 +48,10 @@ impl AppBuilderConfig {
             format!("{}/internal", self.path_to_project),
             format!("{}/internal/routes", self.path_to_project),
             format!("{}/internal/{}", self.path_to_project, custom_ctx_name),
+            format!("{}/internal/env", self.path_to_project),
+            format!("{}/internal/render", self.path_to_project),
             format!("{}/public", self.path_to_project),
         ];
-        if self.config.sessions {
-            let env_dir = format!("{}/internal/env", self.path_to_project);
-            needed.push(env_dir);
-        }
         if self.config.turso {
             let db_dir = format!("{}/testdb", self.path_to_project);
             let db_lib_dir = format!("{}/internal/db", self.path_to_project);
@@ -71,11 +66,69 @@ impl AppBuilderConfig {
     }
 
     fn init_file_to_text_map(&mut self) {
+        let first_letter = self.config.app_name.as_bytes()[0] as char;
+        let custom_ctx_name = format!("{}ctx", first_letter);
         let mut needed = vec![
-            (format!("{}/main.go", self.path_to_project), self.get_main_go_text_content()),
-            (format!("{}/.gitignore", self.path_to_project), self.get_gitignore_text_content()),
-            (format!("{}/Makefile", self.path_to_project), self.get_makefile_text_content()),
+            (
+                format!("{}/main.go", self.path_to_project),
+                self.get_main_go_text_content(),
+            ),
+            (
+                format!("{}/.gitignore", self.path_to_project),
+                self.get_gitignore_text_content(),
+            ),
+            (
+                format!("{}/Makefile", self.path_to_project),
+                self.get_makefile_text_content(),
+            ),
+            (
+                format!("{}/internal/routes/root.go", self.path_to_project),
+                self.get_root_go_text_content(),
+            ),
+            (
+                format!(
+                    "{}/internal/{}/{}.go",
+                    self.path_to_project, custom_ctx_name, custom_ctx_name
+                ),
+                self.get_custom_ctx_text_content(),
+            ),
+            (
+                format!("{}/internal/env/env.go", self.path_to_project),
+                self.get_env_text_content(),
+            ),
+            (
+                format!("{}/internal/render/render.go", self.path_to_project),
+                self.get_render_go_text_content(),
+            ),
+            (
+                format!("{}/public/index.html", self.path_to_project),
+                self.get_index_html_text_content(),
+            ),
+            (
+                format!(
+                    "{}/cmd/{}/main.go",
+                    self.path_to_project, self.config.app_name
+                ),
+                self.get_cmd_main_go_text_content(),
+            ),
         ];
+
+        if self.config.turso {
+            let db_file = (
+                format!("{}/internal/db/db.go", self.path_to_project),
+                self.get_db_go_text_content(),
+            );
+            needed.push(db_file);
+        }
+
+        if self.config.tailwind {
+            let css_file = (
+                format!("{}/css/index.css", self.path_to_project),
+                self.get_css_text_content(),
+            );
+            needed.push(css_file);
+        }
+
         for (key, val) in needed {
             self.file_to_text_map.insert(key, val);
         }
@@ -96,6 +149,9 @@ impl AppBuilderConfig {
         if self.config.tailwind {
             res += "public/css\n\n";
         }
+        if self.config.air {
+            res += "tmp\n\n";
+        }
         return res;
     }
 
@@ -103,7 +159,150 @@ impl AppBuilderConfig {
         let mut res = String::from(".PHONY: all\n");
         res += "all:\n";
         res += "\tgo build -o bin/main\n";
-        return res
+        if self.config.air {
+            res += ".PHONY: dev\n";
+            res += ".dev:\n";
+            res += "\tair";
+            if self.config.tailwind {
+                res += " & pnpm css\n";
+            } else {
+                res += "\n";
+            }
+        }
+        return res;
+    }
+
+    fn get_root_go_text_content(&self) -> String {
+        let first_letter = self.config.app_name.as_bytes()[0] as char;
+        let custom_ctx_name = format!("{}ctx", first_letter);
+        let custom_ctx_type = format!("{}ctx", first_letter.to_uppercase());
+        let template = include_str!("text/root_go");
+        let mut res = template.replace("##mod_name##", &self.mod_name);
+        res = res.replace("##ctx##", &custom_ctx_name);
+        res = res.replace("##Ctx##", &custom_ctx_type);
+        return res;
+    }
+
+    fn get_custom_ctx_text_content(&self) -> String {
+        let first_letter = self.config.app_name.as_bytes()[0] as char;
+        let custom_ctx_name = format!("{}ctx", first_letter);
+        let custom_ctx_type = format!("{}Ctx", first_letter.to_uppercase());
+        let template = include_str!("text/custom_ctx_go");
+        let mut res = template.replace("##ctx##", &custom_ctx_name);
+        res = res.replace("##Ctx##", &custom_ctx_type);
+        let mut imports_replacement = if self.config.sessions {
+            "\"github.com/labstack/echo/v4\"\n\t\"github.com/gorilla/sessions\"".to_string()
+        } else {
+            "\"github.com/labstack/echo/v4\"".to_string()
+        };
+        if self.config.turso {
+            imports_replacement += &format!("\n\t{}/internal/db", self.mod_name);
+        }
+        res = res.replace("##imports##", &imports_replacement);
+        if self.config.sessions {
+            res = res.replace("##session_store##", "Store *sessions.CookieStore")
+        } else {
+            res = res.replace("##session_store##", "")
+        }
+        if self.config.turso {
+            res = res.replace("##db##", "DB *db.DB")
+        } else {
+            res = res.replace("##db##", "")
+        }
+        return res;
+    }
+
+    fn get_env_text_content(&self) -> String {
+        let template = include_str!("text/env_go");
+        let mut res = template.to_string();
+
+        if self.config.sessions {
+            res += r#"func GetSessionSecret() string {
+    return os.Getenv("SESSION_SECRET")\n\
+}"#;
+        }
+
+        if self.config.turso {
+            res += "\n\n";
+            res += r#"func GetDBUrl() string {
+    isProduction := os.Getenv("PRODUCTION")
+    if isProduction == true {
+        return os.Getenv("PROD_DB_URL")
+    } else {
+        return os.Getenv("DBURL")
+    }
+}"#;
+        }
+        return res;
+    }
+
+    fn get_render_go_text_content(&self) -> String {
+        let res = include_str!("text/render_go").to_string();
+        return res;
+    }
+
+    fn get_index_html_text_content(&self) -> String {
+        let template = include_str!("text/index_html");
+        let mut res = template.to_string();
+        res = res.replace("##name##", &self.config.app_name);
+        if self.config.tailwind {
+            res = res.replace(
+                "##css##",
+                "<link rel=\"stylesheet\" href=\"/css/index.css\">",
+            );
+            res = res.replace(
+                "##title##",
+                &format!("<h1 class=\"text-xl\">{}</h1>", self.config.app_name),
+            );
+        } else {
+            res = res.replace("##css##", "");
+            res = res.replace("##title##", &format!("<h1>{}</h1>", self.config.app_name));
+        }
+        if self.config.htmx {
+            res = res.replace(
+                "##htmx##",
+                "<script src=\"https://unpkg.com/htmx.org@1.9.10\"></script>",
+            );
+        } else {
+            res = res.replace("##htmx##", "");
+        }
+        return res;
+    }
+
+    fn get_db_go_text_content(&self) -> String {
+        let res = include_str!("text/db_go").to_string();
+        return res;
+    }
+
+    fn get_css_text_content(&self) -> String {
+        let res = include_str!("text/index_css").to_string();
+        return res;
+    }
+
+    fn get_cmd_main_go_text_content(&self) -> String {
+        let mut res: String;
+        let first_letter = self.config.app_name.as_bytes()[0] as char;
+        let custom_ctx_name = format!("{}ctx", first_letter);
+        if self.config.turso && self.config.sessions && self.config.tailwind {
+            res = include_str!("text/cmd_main_go_full").to_string();
+        } else if self.config.turso && self.config.sessions {
+            res = include_str!("text/cmd_main_go_turso_session").to_string();
+        } else if self.config.turso && self.config.tailwind {
+            res = include_str!("text/cmd_main_go_turso_tailwind").to_string();
+        } else if self.config.turso {
+            res = include_str!("text/cmd_main_go_turso").to_string();
+        } else if self.config.sessions && self.config.tailwind {
+            res = include_str!("text/cmd_main_go_session_tailwind").to_string();
+        } else if self.config.sessions {
+            res = include_str!("text/cmd_main_go_session").to_string();
+        } else if self.config.tailwind {
+            res = include_str!("text/cmd_main_go_tailwind").to_string();
+        } else {
+            res = include_str!("text/cmd_main_go").to_string();
+        }
+        res = res.replace("##mod_name##", &self.mod_name);
+        res = res.replace("##ctx##", &custom_ctx_name);
+        return res;
     }
 }
 
@@ -116,5 +315,28 @@ impl AppBuilder {
     pub fn new(config: Config) -> Result<Self, AppBuilderError> {
         let conf = AppBuilderConfig::new(config)?;
         return Ok(Self { config: conf });
+    }
+
+    pub fn build(&self) -> Result<(), AppBuilderError> {
+        self.create_dirs()?;
+        self.create_files()?;
+        Ok(())
+    }
+
+    fn create_dirs(&self) -> Result<(), AppBuilderError> {
+        for dir in &self.config.dirs_to_create {
+            println!("creating {}", dir);
+            std::fs::create_dir(dir)?;
+        }
+        Ok(())
+    }
+
+    fn create_files(&self) -> Result<(), AppBuilderError> {
+        for (file, content) in &self.config.file_to_text_map {
+            println!("creating {}", file);
+            let mut file = std::fs::File::create(file)?;
+            file.write(content.as_bytes())?;
+        }
+        Ok(())
     }
 }

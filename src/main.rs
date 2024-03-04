@@ -24,7 +24,13 @@ fn main() {
             exit(1);
         }
     };
-    println!("{:#?}", app_builder);
+    match app_builder.build() {
+        Ok(_) => (),
+        Err(e) => {
+            println!("{:#?}", e);
+            exit(1);
+        }
+    };
 }
 
 fn build_config() -> std::io::Result<Config> {
@@ -85,6 +91,18 @@ fn build_config() -> std::io::Result<Config> {
             None => continue,
         }
     }
+    let air: bool;
+    loop {
+        let air_input = read_line(Some("would you like use air? [y/n]: "))?;
+        let yn = yn_to_bool(&air_input);
+        match yn {
+            Some(val) => {
+                air = val;
+                break;
+            }
+            None => continue,
+        }
+    }
 
     let config = ConfigBuilder::new()
         .add_app_name(app_name)
@@ -92,6 +110,7 @@ fn build_config() -> std::io::Result<Config> {
         .add_turso(turso)
         .add_htmx(htmx)
         .add_tailwind(tailwind)
+        .add_air(air)
         .out();
     return Ok(config);
 }
