@@ -39,6 +39,23 @@ impl AppBuilder {
         self.run_go_mod_init()?;
         self.run_pnpm_init()?;
         self.install_tailwind()?;
+        self.run_tailwindcss_init()?;
+        Ok(())
+    }
+
+    fn run_go_mod_init(&self) -> Result<(), AppBuilderError> {
+        let cur_dir = self.cur_path.clone() + "/" + &self.config.app_name;
+        println!("running go mod init");
+        let mut cmd = Command::new("go");
+        cmd.arg("mod")
+            .arg("init")
+            .arg(&self.mod_name)
+            .current_dir(cur_dir);
+        let output = cmd.output()?;
+        let exit_code = get_exit_code(Ok(output.status));
+        if exit_code != 0 {
+            return Err("failed to run go mod init".into());
+        }
         Ok(())
     }
 
@@ -69,6 +86,22 @@ impl AppBuilder {
             .arg("-D")
             .arg("tailwindcss")
             .current_dir(cur_dir);
+        let output = cmd.output()?;
+        let exit_code = get_exit_code(Ok(output.status));
+        if exit_code != 0 {
+            return Err("failed to run go mod init".into());
+        }
+        Ok(())
+    }
+
+    fn run_tailwindcss_init(&self) -> Result<(), AppBuilderError> {
+        if !self.config.tailwind {
+            return Ok(());
+        }
+        println!("initializing tailwind");
+        let cur_dir = self.cur_path.clone() + "/" + &self.config.app_name;
+        let mut cmd = Command::new("npx");
+        cmd.arg("tailwindcss").arg("init").current_dir(cur_dir);
         let output = cmd.output()?;
         let exit_code = get_exit_code(Ok(output.status));
         if exit_code != 0 {
@@ -170,21 +203,5 @@ impl AppBuilder {
             needed.push(css_file);
         }
         return needed;
-    }
-
-    fn run_go_mod_init(&self) -> Result<(), AppBuilderError> {
-        let cur_dir = self.cur_path.clone() + "/" + &self.config.app_name;
-        println!("running go mod init");
-        let mut cmd = Command::new("go");
-        cmd.arg("mod")
-            .arg("init")
-            .arg(&self.mod_name)
-            .current_dir(cur_dir);
-        let output = cmd.output()?;
-        let exit_code = get_exit_code(Ok(output.status));
-        if exit_code != 0 {
-            return Err("failed to run go mod init".into());
-        }
-        Ok(())
     }
 }
