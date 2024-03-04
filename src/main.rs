@@ -17,7 +17,6 @@ fn main() {
             exit(1);
         }
     };
-    println!("{:#?}", config);
     let app_builder = match AppBuilder::new(config) {
         Ok(ab) => ab,
         Err(e) => {
@@ -25,13 +24,7 @@ fn main() {
             exit(1);
         }
     };
-    match app_builder.build() {
-        Ok(_) => (),
-        Err(e) => {
-            println!("{:#?}", e);
-            exit(1);
-        }
-    };
+    println!("{:#?}", app_builder);
 }
 
 fn build_config() -> std::io::Result<Config> {

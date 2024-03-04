@@ -1,207 +1,120 @@
-use std::{env, error::Error, fs, process::Command};
+use std::{env, error::Error};
 
 use crate::{
     config::Config,
-    util::{get_exit_code, get_git_username},
+    util::get_git_username,
 };
-
-#[derive(Debug)]
-pub struct AppBuilder {
-    mod_name: String,
-    cur_path: String,
-    config: Config,
-}
 
 type AppBuilderError = Box<dyn Error>;
 
-impl AppBuilder {
+#[derive(Debug)]
+struct AppBuilderConfig {
+    mod_name: String,
+    path_to_project: String,
+    config: Config,
+    dirs_to_create: Vec<String>,
+    file_to_text_map: std::collections::HashMap<String, String>,
+}
+
+impl AppBuilderConfig {
     pub fn new(config: Config) -> Result<Self, AppBuilderError> {
-        let git_user_name = get_git_username();
         let cur_path_buf = env::current_dir()?;
         let cur_path = match cur_path_buf.to_str() {
             Some(s) => s.to_string(),
             None => return Err("cur path is not a valid string".into()),
         };
+        let path_to_project = cur_path + "/" + &config.app_name;
+        let git_user_name = get_git_username();
         let mod_name = match &git_user_name {
             Some(name) => format!("github.com/{}/{}", name, config.app_name),
             None => config.app_name.clone(),
         };
-        Ok(Self {
+        let mut res = Self {
             mod_name,
-            cur_path,
+            path_to_project,
             config,
-        })
+            dirs_to_create: Vec::new(),
+            file_to_text_map: std::collections::HashMap::new(),
+        };
+        res.add_dirs_to_create();
+        res.init_file_to_text_map();
+        Ok(res)
     }
 
-    pub fn build(&self) -> Result<(), AppBuilderError> {
-        self.make_needed_directories()?;
-        self.make_needed_files()?;
-        self.run_go_mod_init()?;
-        self.run_pnpm_init()?;
-        self.install_tailwind()?;
-        self.run_tailwindcss_init()?;
-        Ok(())
-    }
-
-    fn run_go_mod_init(&self) -> Result<(), AppBuilderError> {
-        let cur_dir = self.cur_path.clone() + "/" + &self.config.app_name;
-        println!("running go mod init");
-        let mut cmd = Command::new("go");
-        cmd.arg("mod")
-            .arg("init")
-            .arg(&self.mod_name)
-            .current_dir(cur_dir);
-        let output = cmd.output()?;
-        let exit_code = get_exit_code(Ok(output.status));
-        if exit_code != 0 {
-            return Err("failed to run go mod init".into());
-        }
-        Ok(())
-    }
-
-    fn run_pnpm_init(&self) -> Result<(), AppBuilderError> {
-        if !self.config.tailwind {
-            return Ok(());
-        }
-        println!("running pnpm init");
-        let cur_dir = self.cur_path.clone() + "/" + &self.config.app_name;
-        let mut cmd = Command::new("pnpm");
-        cmd.arg("init").current_dir(cur_dir);
-        let output = cmd.output()?;
-        let exit_code = get_exit_code(Ok(output.status));
-        if exit_code != 0 {
-            return Err("failed to run go mod init".into());
-        }
-        Ok(())
-    }
-
-    fn install_tailwind(&self) -> Result<(), AppBuilderError> {
-        if !self.config.tailwind {
-            return Ok(());
-        }
-        println!("installing tailwind");
-        let cur_dir = self.cur_path.clone() + "/" + &self.config.app_name;
-        let mut cmd = Command::new("pnpm");
-        cmd.arg("add")
-            .arg("-D")
-            .arg("tailwindcss")
-            .current_dir(cur_dir);
-        let output = cmd.output()?;
-        let exit_code = get_exit_code(Ok(output.status));
-        if exit_code != 0 {
-            return Err("failed to run go mod init".into());
-        }
-        Ok(())
-    }
-
-    fn run_tailwindcss_init(&self) -> Result<(), AppBuilderError> {
-        if !self.config.tailwind {
-            return Ok(());
-        }
-        println!("initializing tailwind");
-        let cur_dir = self.cur_path.clone() + "/" + &self.config.app_name;
-        let mut cmd = Command::new("npx");
-        cmd.arg("tailwindcss").arg("init").current_dir(cur_dir);
-        let output = cmd.output()?;
-        let exit_code = get_exit_code(Ok(output.status));
-        if exit_code != 0 {
-            return Err("failed to run go mod init".into());
-        }
-        Ok(())
-    }
-
-    fn make_needed_directories(&self) -> Result<(), AppBuilderError> {
-        let dirs = self.get_needed_dirs();
-        for dir in dirs {
-            fs::create_dir(dir)?;
-        }
-        Ok(())
-    }
-
-    fn make_needed_files(&self) -> Result<(), AppBuilderError> {
-        let files = self.get_needed_files();
-        for file in files {
-            let _ = fs::File::create(file)?;
-        }
-        Ok(())
-    }
-
-    fn get_needed_dirs(&self) -> Vec<String> {
+    fn add_dirs_to_create(&mut self) {
         let first_letter = self.config.app_name.as_bytes()[0] as char;
         let custom_ctx_name = format!("{}ctx", first_letter);
         let mut needed = vec![
-            format!("{}/{}", self.cur_path, self.config.app_name),
-            format!("{}/{}/cmd", self.cur_path, self.config.app_name),
-            format!(
-                "{}/{}/cmd/{}",
-                self.cur_path, self.config.app_name, self.config.app_name
-            ),
-            format!("{}/{}/internal", self.cur_path, self.config.app_name),
-            format!("{}/{}/internal/routes", self.cur_path, self.config.app_name),
-            format!(
-                "{}/{}/internal/{}",
-                self.cur_path, self.config.app_name, custom_ctx_name
-            ),
-            format!("{}/{}/public", self.cur_path, self.config.app_name),
+            self.path_to_project.clone(),
+            format!("{}/cmd", self.path_to_project),
+            format!("{}/cmd/{}", self.path_to_project, self.config.app_name),
+            format!("{}/internal", self.path_to_project),
+            format!("{}/internal/routes", self.path_to_project),
+            format!("{}/internal/{}", self.path_to_project, custom_ctx_name),
+            format!("{}/public", self.path_to_project),
         ];
         if self.config.sessions {
-            let env_dir = format!("{}/{}/internal/env", self.cur_path, self.config.app_name);
+            let env_dir = format!("{}/internal/env", self.path_to_project);
             needed.push(env_dir);
         }
         if self.config.turso {
-            let db_dir = format!("{}/{}/testdb", self.cur_path, self.config.app_name);
+            let db_dir = format!("{}/testdb", self.path_to_project);
+            let db_lib_dir = format!("{}/internal/db", self.path_to_project);
             needed.push(db_dir);
+            needed.push(db_lib_dir);
         }
         if self.config.tailwind {
-            let css_dir = format!("{}/{}/css", self.cur_path, self.config.app_name);
+            let css_dir = format!("{}/css", self.path_to_project);
             needed.push(css_dir);
         }
-        needed
+        self.dirs_to_create = needed;
     }
 
-    fn get_needed_files(&self) -> Vec<String> {
-        let first_letter = self.config.app_name.as_bytes()[0] as char;
-        let custom_ctx_name = format!("{}ctx", first_letter);
+    fn init_file_to_text_map(&mut self) {
         let mut needed = vec![
-            format!("{}/{}/main.go", self.cur_path, self.config.app_name),
-            format!("{}/{}/Makefile", self.cur_path, self.config.app_name),
-            format!("{}/{}/.env", self.cur_path, self.config.app_name),
-            format!("{}/{}/.gitignore", self.cur_path, self.config.app_name),
-            format!(
-                "{}/{}/cmd/{}/main.go",
-                self.cur_path, self.config.app_name, self.config.app_name
-            ),
-            format!(
-                "{}/{}/internal/routes/root.go",
-                self.cur_path, self.config.app_name
-            ),
-            format!(
-                "{}/{}/internal/{}/{}.go",
-                self.cur_path, self.config.app_name, custom_ctx_name, custom_ctx_name
-            ),
-            format!(
-                "{}/{}/public/index.html",
-                self.cur_path, self.config.app_name
-            ),
+            (format!("{}/main.go", self.path_to_project), self.get_main_go_text_content()),
+            (format!("{}/.gitignore", self.path_to_project), self.get_gitignore_text_content()),
+            (format!("{}/Makefile", self.path_to_project), self.get_makefile_text_content()),
         ];
-        if self.config.sessions {
-            let env_lib_file = format!(
-                "{}/{}/internal/env/env.go",
-                self.cur_path, self.config.app_name
-            );
-            needed.push(env_lib_file);
+        for (key, val) in needed {
+            self.file_to_text_map.insert(key, val);
         }
+    }
+
+    fn get_main_go_text_content(&self) -> String {
+        let template = include_str!("text/main_go");
+        let mut res = template.replace("##name##", &self.config.app_name);
+        res = res.replace("##mod_name##", &self.mod_name);
+        return res;
+    }
+
+    fn get_gitignore_text_content(&self) -> String {
+        let mut res = String::from("bin\n\n.env\n\n");
         if self.config.turso {
-            let db_file = format!(
-                "{}/{}/testdb/testdb.db",
-                self.cur_path, self.config.app_name
-            );
-            needed.push(db_file);
+            res += "testdb\n\n";
         }
         if self.config.tailwind {
-            let css_file = format!("{}/{}/css/index.css", self.cur_path, self.config.app_name);
-            needed.push(css_file);
+            res += "public/css\n\n";
         }
-        return needed;
+        return res;
+    }
+
+    fn get_makefile_text_content(&self) -> String {
+        let mut res = String::from(".PHONY: all\n");
+        res += "all:\n";
+        res += "\tgo build -o bin/main\n";
+        return res
+    }
+}
+
+#[derive(Debug)]
+pub struct AppBuilder {
+    config: AppBuilderConfig,
+}
+
+impl AppBuilder {
+    pub fn new(config: Config) -> Result<Self, AppBuilderError> {
+        let conf = AppBuilderConfig::new(config)?;
+        return Ok(Self { config: conf });
     }
 }

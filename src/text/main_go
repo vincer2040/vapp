@@ -1,0 +1,7 @@
+package ##name##
+
+import "##mod_name##"
+
+func main() {
+    ##name##.Main()
+}
