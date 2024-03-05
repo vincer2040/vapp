@@ -1,6 +1,9 @@
-use std::{env, error::Error, io::Write};
+use std::{env, error::Error, io::Write, process::Command};
 
-use crate::{config::Config, util::get_git_username};
+use crate::{
+    config::Config,
+    util::{get_exit_code, get_git_username},
+};
 
 type AppBuilderError = Box<dyn Error>;
 
@@ -137,7 +140,7 @@ impl AppBuilderConfig {
     fn get_main_go_text_content(&self) -> String {
         let template = include_str!("text/main_go");
         let mut res = template.replace("##name##", &self.config.app_name);
-        res = res.replace("##mod_name##", &self.mod_name);
+        res = res.replace("##mod_name##", &format!("{}/cmd/{}", self.mod_name, self.config.app_name));
         return res;
     }
 
@@ -158,15 +161,15 @@ impl AppBuilderConfig {
     fn get_makefile_text_content(&self) -> String {
         let mut res = String::from(".PHONY: all\n");
         res += "all:\n";
-        res += "\tgo build -o bin/main\n";
+        res += "\tgo build -o bin/main\n\n";
         if self.config.air {
             res += ".PHONY: dev\n";
             res += ".dev:\n";
             res += "\tair";
             if self.config.tailwind {
-                res += " & pnpm css\n";
+                res += " & pnpm css\n\n";
             } else {
-                res += "\n";
+                res += "\n\n";
             }
         }
         return res;
@@ -175,7 +178,7 @@ impl AppBuilderConfig {
     fn get_root_go_text_content(&self) -> String {
         let first_letter = self.config.app_name.as_bytes()[0] as char;
         let custom_ctx_name = format!("{}ctx", first_letter);
-        let custom_ctx_type = format!("{}ctx", first_letter.to_uppercase());
+        let custom_ctx_type = format!("{}Ctx", first_letter.to_uppercase());
         let template = include_str!("text/root_go");
         let mut res = template.replace("##mod_name##", &self.mod_name);
         res = res.replace("##ctx##", &custom_ctx_name);
@@ -196,7 +199,7 @@ impl AppBuilderConfig {
             "\"github.com/labstack/echo/v4\"".to_string()
         };
         if self.config.turso {
-            imports_replacement += &format!("\n\t{}/internal/db", self.mod_name);
+            imports_replacement += &format!("\n\t\"{}/internal/db\"", self.mod_name);
         }
         res = res.replace("##imports##", &imports_replacement);
         if self.config.sessions {
@@ -218,7 +221,7 @@ impl AppBuilderConfig {
 
         if self.config.sessions {
             res += r#"func GetSessionSecret() string {
-    return os.Getenv("SESSION_SECRET")\n\
+    return os.Getenv("SESSION_SECRET")
 }"#;
         }
 
@@ -226,7 +229,7 @@ impl AppBuilderConfig {
             res += "\n\n";
             res += r#"func GetDBUrl() string {
     isProduction := os.Getenv("PRODUCTION")
-    if isProduction == true {
+    if isProduction == "true" {
         return os.Getenv("PROD_DB_URL")
     } else {
         return os.Getenv("DBURL")
@@ -320,12 +323,123 @@ impl AppBuilder {
     pub fn build(&self) -> Result<(), AppBuilderError> {
         self.create_dirs()?;
         self.create_files()?;
+        self.run_go_mod_init()?;
+        self.run_pnpm_init()?;
+        self.install_tailwind()?;
+        self.initialize_tailwind()?;
+        self.initialize_air()?;
+        self.run_go_mod_tidy()?;
+        self.run_go_fmt()?;
+        println!("done");
+        Ok(())
+    }
+
+    fn run_go_mod_init(&self) -> Result<(), AppBuilderError> {
+        println!("running go mod init");
+        let mut cmd = Command::new("go");
+        cmd.arg("mod")
+            .arg("init")
+            .arg(&self.config.mod_name)
+            .current_dir(&self.config.path_to_project);
+        let output = cmd.output()?;
+        let exit_code = get_exit_code(Ok(output.status));
+        if exit_code != 0 {
+            return Err("failed to run go mod init".into());
+        }
+        Ok(())
+    }
+
+    fn run_pnpm_init(&self) -> Result<(), AppBuilderError> {
+        if !self.config.config.tailwind {
+            return Ok(());
+        }
+        println!("running pnpm init");
+        let mut cmd = Command::new("pnpm");
+        cmd.arg("init").current_dir(&self.config.path_to_project);
+        let output = cmd.output()?;
+        let exit_code = get_exit_code(Ok(output.status));
+        if exit_code != 0 {
+            return Err("failed to run pnpm init".into());
+        }
+        Ok(())
+    }
+
+    fn install_tailwind(&self) -> Result<(), AppBuilderError> {
+        if !self.config.config.tailwind {
+            return Ok(());
+        }
+        println!("installing tailwind");
+        let mut cmd = Command::new("pnpm");
+        cmd.arg("add")
+            .arg("-D")
+            .arg("tailwindcss")
+            .current_dir(&self.config.path_to_project);
+        let output = cmd.output()?;
+        let exit_code = get_exit_code(Ok(output.status));
+        if exit_code != 0 {
+            return Err("failed to install tailwind".into());
+        }
+        Ok(())
+    }
+
+    fn initialize_tailwind(&self) -> Result<(), AppBuilderError> {
+        if !self.config.config.tailwind {
+            return Ok(());
+        }
+        println!("initializing tailwind");
+        let mut cmd = Command::new("npx");
+        cmd.arg("tailwindcss")
+            .arg("init")
+            .current_dir(&self.config.path_to_project);
+        let output = cmd.output()?;
+        let exit_code = get_exit_code(Ok(output.status));
+        if exit_code != 0 {
+            return Err("failed to initailize tailwind".into());
+        }
+        Ok(())
+    }
+
+    fn initialize_air(&self) -> Result<(), AppBuilderError> {
+        if !self.config.config.air {
+            return Ok(());
+        }
+        println!("initializing air");
+        let mut cmd = Command::new("air");
+        cmd.arg("init").current_dir(&self.config.path_to_project);
+        let output = cmd.output()?;
+        let exit_code = get_exit_code(Ok(output.status));
+        if exit_code != 0 {
+            return Err("failed to initialize air".into());
+        }
+        Ok(())
+    }
+
+    fn run_go_mod_tidy(&self) -> Result<(), AppBuilderError> {
+        println!("running go mod tidy");
+        let mut cmd = Command::new("go");
+        cmd.arg("mod").arg("tidy").current_dir(&self.config.path_to_project);
+        let output = cmd.output()?;
+        let exit_code = get_exit_code(Ok(output.status));
+        if exit_code != 0 {
+            return Err("failed to run go mod tidy".into());
+        }
+        Ok(())
+    }
+
+    fn run_go_fmt(&self) -> Result<(), AppBuilderError> {
+        println!("running go fmt");
+        let mut cmd = Command::new("go");
+        cmd.arg("fmt").arg("./...").current_dir(&self.config.path_to_project);
+        let output = cmd.output()?;
+        let exit_code = get_exit_code(Ok(output.status));
+        if exit_code != 0 {
+            return Err("failed to run go fmt".into());
+        }
         Ok(())
     }
 
     fn create_dirs(&self) -> Result<(), AppBuilderError> {
         for dir in &self.config.dirs_to_create {
-            println!("creating {}", dir);
             std::fs::create_dir(dir)?;
         }
         Ok(())
@@ -333,7 +447,6 @@ impl AppBuilder {
 
     fn create_files(&self) -> Result<(), AppBuilderError> {
         for (file, content) in &self.config.file_to_text_map {
-            println!("creating {}", file);
             let mut file = std::fs::File::create(file)?;
             file.write(content.as_bytes())?;
         }
