@@ -81,6 +81,10 @@ impl AppBuilderConfig {
                 self.get_gitignore_text_content(),
             ),
             (
+                format!("{}/.env", self.path_to_project),
+                self.get_dot_env_text_content(),
+            ),
+            (
                 format!("{}/Makefile", self.path_to_project),
                 self.get_makefile_text_content(),
             ),
@@ -140,7 +144,10 @@ impl AppBuilderConfig {
     fn get_main_go_text_content(&self) -> String {
         let template = include_str!("text/main_go");
         let mut res = template.replace("##name##", &self.config.app_name);
-        res = res.replace("##mod_name##", &format!("{}/cmd/{}", self.mod_name, self.config.app_name));
+        res = res.replace(
+            "##mod_name##",
+            &format!("{}/cmd/{}", self.mod_name, self.config.app_name),
+        );
         return res;
     }
 
@@ -155,6 +162,11 @@ impl AppBuilderConfig {
         if self.config.air {
             res += "tmp\n\n";
         }
+        return res;
+    }
+
+    fn get_dot_env_text_content(&self) -> String {
+        let res = include_str!("text/env").to_string();
         return res;
     }
 
@@ -417,7 +429,9 @@ impl AppBuilder {
     fn run_go_mod_tidy(&self) -> Result<(), AppBuilderError> {
         println!("running go mod tidy");
         let mut cmd = Command::new("go");
-        cmd.arg("mod").arg("tidy").current_dir(&self.config.path_to_project);
+        cmd.arg("mod")
+            .arg("tidy")
+            .current_dir(&self.config.path_to_project);
         let output = cmd.output()?;
         let exit_code = get_exit_code(Ok(output.status));
         if exit_code != 0 {
@@ -429,7 +443,9 @@ impl AppBuilder {
     fn run_go_fmt(&self) -> Result<(), AppBuilderError> {
         println!("running go fmt");
         let mut cmd = Command::new("go");
-        cmd.arg("fmt").arg("./...").current_dir(&self.config.path_to_project);
+        cmd.arg("fmt")
+            .arg("./...")
+            .current_dir(&self.config.path_to_project);
         let output = cmd.output()?;
         let exit_code = get_exit_code(Ok(output.status));
         if exit_code != 0 {

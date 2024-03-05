@@ -1,0 +1,7 @@
+PRODUCTION=false
+
+DBURL="testdb/testdb.db"
+
+PROD_DB_URL="<your production db url>"
+
+SESSION_SECRET="<your session secret>"
